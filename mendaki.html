@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mendaki Gunung Pulosari — rsmaa189</title>
+<style>
+  :root{
+    --sky1:#8fd3ff;
+    --sky2:#cfefff;
+    --mount:#4E944F;
+    --platform:#8B4513;
+    --card:#ffffffcc;
+    --accent:#ff6b35;
+  }
+  html,body{height:100%;margin:0;font-family:Inter, system-ui, Arial, sans-serif;background:linear-gradient(var(--sky1),var(--sky2));}
+  #wrap{display:flex;align-items:center;justify-content:center;height:100%;padding:16px;box-sizing:border-box;}
+  #game{width:100%;max-width:1000px;height:700px;background:linear-gradient(#bde7ff,#e9fbff);border-radius:12px;box-shadow:0 10px 40px rgba(10,30,60,0.12);position:relative;overflow:hidden;}
+  canvas{display:block;width:100%;height:100%;}
+  /* HUD */
+  .hud{position:absolute;left:18px;top:14px;color:#063046;text-shadow:0 1px 0 #fff9;}
+  .badge{background:var(--card);padding:8px 12px;border-radius:999px;display:inline-flex;gap:10px;align-items:center;box-shadow:0 6px 18px rgba(10,30,60,0.06);}
+  .stats{margin-top:8px;display:flex;gap:8px;font-size:14px;}
+  .stat{background:var(--card);padding:6px 8px;border-radius:8px;}
+  /* Controls (mobile) */
+  .controls{position:absolute;left:18px;bottom:18px;display:flex;gap:8px}
+  .btn{background:var(--card);padding:10px 14px;border-radius:10px;box-shadow:0 6px 18px rgba(10,30,60,0.06);user-select:none}
+  .center-panel{position:absolute;right:18px;top:50%;transform:translateY(-50%);background:linear-gradient(180deg,#ffffffcc,#f0fbffcc);padding:12px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.08);width:220px;}
+  .title{font-weight:800;color:#063046;margin:0 0 6px 0}
+  .sub{font-size:13px;color:#064;}
+  .start{display:block;margin:12px auto 0;padding:10px 14px;border-radius:10px;border:0;background:var(--accent);color:white;font-weight:700;cursor:pointer}
+  /* overlay */
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none}
+  .panel{pointer-events:auto;background:linear-gradient(#ffffff,#f7feff);padding:18px;border-radius:12px;box-shadow:0 12px 40px rgba(10,30,60,0.14);text-align:center;max-width:520px}
+  .panel h1{margin:0 0 6px;font-size:22px;color:#063046}
+  .panel p{margin:6px 0;color:#0b3344}
+  .panel button{margin-top:10px;padding:10px 16px;border-radius:8px;border:0;cursor:pointer;background:#1f8fff;color:white;font-weight:700}
+  /* responsive */
+  @media(max-width:520px){#game{height:86vh}.center-panel{display:none}}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="game">
+    <div class="hud">
+      <div class="badge">👤 <strong>rsmaa189</strong></div>
+      <div class="stats">
+        <div class="stat" id="alt">Altitude: 0 m</div>
+        <div class="stat" id="stam">Stamina: 100%</div>
+        <div class="stat" id="best">Best: 0 m</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="btn" id="left">◀</div>
+      <div class="btn" id="jump">Lompat</div>
+      <div class="btn" id="right">▶</div>
+    </div>
+
+    <div class="center-panel">
+      <div class="title">Mendaki Gunung Pulosari</div>
+      <div class="sub">Gabungan visual kartun + nuansa alam</div>
+      <button class="start" id="startBtn">Mulai Mendaki</button>
+      <div style="margin-top:8px;font-size:12px;color:#056">Game by rsmaa189</div>
+    </div>
+
+    <canvas id="c"></canvas>
+
+    <div id="overlay">
+      <div class="panel" id="menu">
+        <h1>Mendaki Gunung Pulosari</h1>
+        <p>Selamat datang, <strong>rsmaa189</strong> — siap mendaki sampai puncak?</p>
+        <button id="play">Mulai</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Basic 2D platformer-like climb:
+ - Player controlled by arrow keys or on-screen buttons
+ - Platforms generated ascending to create "climb" feeling
+ - Altitude measured by highest y reached (smaller y -> higher altitude)
+ - Stamina decreases when jumping; recovers slowly on platforms
+ - Best altitude stored in localStorage
+*/
+
+// Canvas setup
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = canvas.width = document.getElementById('game').clientWidth;
+let H = canvas.height = document.getElementById('game').clientHeight;
+
+// Game state
+let running = false;
+let scrollY = 0; // world scroll offset
+let altitude = 0;
+let best = Number(localStorage.getItem('best_alt')) || 0;
+document.getElementById('best').innerText = 'Best: ' + Math.round(best) + ' m';
+let stamina = 100;
+
+// Player
+const player = {
+  x: W/4,
+  y: H - 140,
+  w: 44,
+  h: 54,
+  vx: 0,
+  vy: 0,
+  speed: 4,
+  jump: -13,
+  grounded: false,
+  color: '#ff6b35'
+};
+
+// Platforms list
+let platforms = [];
+
+// Input
+const keys = {};
+window.addEventListener('keydown', e=>{ keys[e.code]=true; if(e.code==='Space') e.preventDefault(); });
+window.addEventListener('keyup', e=>{ keys[e.code]=false; });
+
+// Mobile buttons
+document.getElementById('left').addEventListener('touchstart',e=>{keys['ArrowLeft']=true; e.preventDefault()});
+document.getElementById('left').addEventListener('touchend',e=>{keys['ArrowLeft']=false; e.preventDefault()});
+document.getElementById('right').addEventListener('touchstart',e=>{keys['ArrowRight']=true; e.preventDefault()});
+document.getElementById('right').addEventListener('touchend',e=>{keys['ArrowRight']=false; e.preventDefault()});
+document.getElementById('jump').addEventListener('touchstart',e=>{keys['Space']=true; e.preventDefault()});
+document.getElementById('jump').addEventListener('touchend',e=>{keys['Space']=false; e.preventDefault()});
+
+// Start buttons
+document.getElementById('play').addEventListener('click', start);
+document.getElementById('startBtn').addEventListener('click', start);
+
+// Helper: create initial platforms ascending
+function initPlatforms(){
+  platforms = [];
+  // ground
+  platforms.push({x:-200, y:H-90, w:W+400, h:120});
+  // ascending platforms (more spaced vertically to simulate climb)
+  let x = 200;
+  for(let i=0;i<25;i++){
+    const w = 120 + Math.random()*120;
+    const y = H - 180 - i*120 - Math.random()*40;
+    platforms.push({x: x + (Math.random()-0.5)*200, y, w, h:18});
+    x += 80 + Math.random()*160;
+    if(x > W + 200) x = 100;
+  }
+}
+
+// Start game
+function start(){
+  document.getElementById('overlay').style.display='none';
+  running = true;
+  W = canvas.width = document.getElementById('game').clientWidth;
+  H = canvas.height = document.getElementById('game').clientHeight;
+  player.x = W/4; player.y = H - 200; player.vx=0; player.vy=0; stamina=100; altitude=0; scrollY=0;
+  initPlatforms();
+  loop();
+}
+
+// Physics & collision
+function step(){
+  // input horizontal
+  if(keys['ArrowLeft']) player.vx = -player.speed;
+  else if(keys['ArrowRight']) player.vx = player.speed;
+  else player.vx = 0;
+
+  // jump
+  if(keys['Space'] && player.grounded && stamina>5){
+    player.vy = player.jump;
+    player.grounded = false;
+    stamina = Math.max(0, stamina-12);
+  }
+
+  // gravity
+  player.vy += 0.7;
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // boundaries
+  if(player.x < -50) player.x = -50;
+  if(player.x > W- player.w + 50) player.x = W - player.w + 50;
+
+  // collision with platforms
+  player.grounded = false;
+  for(let p of platforms){
+    if(player.x + player.w > p.x && player.x < p.x + p.w){
+      if(player.y + player.h > p.y && player.y + player.h < p.y + p.h + 30 && player.vy >=0){
+        player.y = p.y - player.h;
+        player.vy = 0;
+        player.grounded = true;
+      }
+    }
+  }
+
+  // stamina regen when grounded
+  if(player.grounded) stamina = Math.min(100, stamina + 0.25);
+
+  // scrolling: when player reaches upper part, scroll world up
+  const threshold = H*0.35;
+  if(player.y < threshold){
+    const dy = threshold - player.y;
+    player.y = threshold;
+    scrollY += dy;
+    // move platforms down (world moves)
+    for(let p of platforms) p.y += dy;
+    altitude = Math.max(altitude, scrollY);
+    document.getElementById('alt').innerText = 'Altitude: ' + Math.round(altitude) + ' m';
+    document.getElementById('stam').innerText = 'Stamina: ' + Math.round(stamina) + '%';
+    if(altitude > best){
+      best = altitude;
+      document.getElementById('best').innerText = 'Best: ' + Math.round(best) + ' m';
+    }
+  }
+
+  // generate more platforms if needed
+  const highest = Math.min(...platforms.map(p=>p.y));
+  if(highest > -2000){
+    let x = Math.random()* (W-200);
+    let y = highest - 140 - Math.random()*80;
+    platforms.push({x, y, w:100+Math.random()*140, h:18});
+  }
+
+  // game over if player falls below screen bottom by large margin
+  if(player.y > H + 500){
+    running = false;
+    // save best
+    if(altitude > Number(localStorage.getItem('best_alt')||0)){
+      localStorage.setItem('best_alt', Math.round(altitude));
+    }
+    showGameOver();
+  }
+}
+
+// Render
+function render(){
+  // background sky
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#8fd3ff');
+  grad.addColorStop(1,'#cfefff');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+
+  // clouds (simple)
+  for(let i=0;i<6;i++){
+    const cx = (i*200 + (Date.now()/50)%400) % (W+200) - 100;
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.ellipse(cx,80 + (i%2)*20,60,28,0,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  // mountain silhouette (cartoon + natural)
+  ctx.fillStyle = '#3f7a3f';
+  ctx.beginPath();
+  ctx.moveTo(0,H-120);
+  ctx.lineTo(W*0.2,H-320);
+  ctx.lineTo(W*0.4,H-160);
+  ctx.lineTo(W*0.6,H-420);
+  ctx.lineTo(W*0.8,H-180);
+  ctx.lineTo(W,H-320);
+  ctx.lineTo(W,H);
+  ctx.lineTo(0,H);
+  ctx.closePath();
+  ctx.fill();
+
+  // draw platforms
+  for(let p of platforms){
+    ctx.fillStyle = '#6e3f17';
+    roundRect(ctx, p.x, p.y, p.w, p.h, 6, true, false);
+    // small grass
+    ctx.fillStyle = '#60ad4b';
+    ctx.fillRect(p.x+6, p.y-6, Math.min(40,p.w-12),6);
+  }
+
+  // draw player (cartoon-ish)
+  ctx.save();
+  // body
+  ctx.fillStyle = player.color;
+  roundRect(ctx, player.x, player.y, player.w, player.h, 8, true, false);
+  // head
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(player.x+player.w/2, player.y+12, 10,0,Math.PI*2);
+  ctx.fill();
+  // eye
+  ctx.fillStyle = '#222';
+  ctx.beginPath();
+  ctx.arc(player.x+player.w/2 + 3, player.y+12, 3,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+
+  // HUD overlay small shadows handled by DOM elements
+}
+
+// helper round rect
+function roundRect(ctx, x, y, w, h, r, fill, stroke){
+  if (typeof stroke === 'undefined') stroke = true;
+  if (typeof r === 'undefined') r = 5;
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+  if(fill) ctx.fill();
+  if(stroke) ctx.stroke();
+}
+
+function loop(){
+  if(!running) return;
+  step();
+  render();
+  requestAnimationFrame(loop);
+}
+
+// Resize handling
+window.addEventListener('resize', ()=>{
+  W = canvas.width = document.getElementById('game').clientWidth;
+  H = canvas.height = document.getElementById('game').clientHeight;
+});
+
+// Game over panel
+function showGameOver(){
+  const panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.style.position='absolute';
+  panel.style.left='50%';
+  panel.style.top='50%';
+  panel.style.transform='translate(-50%,-50%)';
+  panel.innerHTML = '<h2>Game Over</h2><p>Altitude: '+Math.round(altitude)+' m</p><p>Best: '+Math.round(localStorage.getItem('best_alt')||best)+' m</p><button id="retry">Main Lagi</button>';
+  document.getElementById('game').appendChild(panel);
+  panel.querySelector('#retry').addEventListener('click', ()=>{
+    panel.remove();
+    document.getElementById('overlay').style.display='flex';
+  });
+}
+
+// expose simple debug for saving best when leaving
+window.addEventListener('beforeunload', ()=>{
+  if(altitude > Number(localStorage.getItem('best_alt')||0)){
+    localStorage.setItem('best_alt', Math.round(altitude));
+  }
+});
+</script>
+</body>
+</html>
